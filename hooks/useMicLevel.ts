@@ -36,7 +36,7 @@ export function useMicLevel(active: boolean): number {
           if (!analyserRef.current || !dataArrayRef.current) return;
           analyserRef.current.getByteFrequencyData(dataArrayRef.current);
           const average = dataArrayRef.current.reduce((a, b) => a + b) / dataArrayRef.current.length;
-          const normalized = Math.min(average / 128, 1); // scale to 0-1
+          const normalized = Math.min(average / 128, 1);
           setLevel(normalized);
           animationRef.current = requestAnimationFrame(updateLevel);
         };
