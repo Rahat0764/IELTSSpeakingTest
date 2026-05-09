@@ -15,28 +15,40 @@ export default function CameraView({ videoRef, canvasRef, onExpressionUpdate }: 
   const [cameraReady, setCameraReady] = useState(false);
   const meshCanvasRef = useRef<HTMLCanvasElement>(null);
 
+  // Start video after models load
+  const startVideo = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        videoRef.current.onloadedmetadata = () => {
+          videoRef.current?.play();
+          setCameraReady(true);
+        };
+      }
+    } catch (err) {
+      console.error("Camera access denied");
+    }
+  };
+
   useEffect(() => {
-    const startVideo = async () => {
+    // Load face-api models first
+    const loadModels = async () => {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          videoRef.current.onloadedmetadata = () => {
-            videoRef.current?.play();
-            setCameraReady(true);
-          };
-        }
-      } catch (err) {
-        console.error("Camera access denied");
+        await faceapi.nets.tinyFaceDetector.loadFromUri('/models');
+        await faceapi.nets.faceExpressionNet.loadFromUri('/models');
+        startVideo(); // start camera after models
+      } catch (e) {
+        console.error("Model load failed", e);
       }
     };
-    startVideo();
+    loadModels();
   }, []);
 
   useEffect(() => {
     if (!cameraReady || !videoRef.current) return;
 
-    // face-api expression detection
+    // face-api expression detection every 500ms
     const interval = setInterval(async () => {
       if (!videoRef.current) return;
       const detections = await faceapi
@@ -48,7 +60,7 @@ export default function CameraView({ videoRef, canvasRef, onExpressionUpdate }: 
           angry: exp.angry * 100,
           confident: 100 - exp.fearful * 100 - exp.sad * 50,
           nervous: exp.fearful * 80 + exp.surprised * 20,
-          lying: (exp.disgusted + exp.fearful) * 50, // simplified
+          lying: (exp.disgusted + exp.fearful) * 50,
         });
       }
     }, 500);
