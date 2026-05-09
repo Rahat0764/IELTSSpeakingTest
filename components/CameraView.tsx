@@ -5,6 +5,26 @@ import { FaceMesh } from '@mediapipe/face_mesh';
 import { Camera } from '@mediapipe/camera_utils';
 import { drawConnectors, drawLandmarks } from '@mediapipe/drawing_utils';
 
+// Manually define tessellation from MediaPipe source
+const FACEMESH_TESSELATION = [
+  [127, 34], [34, 139], [139, 127], [11, 37], [37, 67], [67, 11],
+  [232, 231], [231, 120], [120, 232], [72, 37], [37, 39], [39, 72],
+  [128, 121], [121, 47], [47, 128], [114, 115], [115, 48], [48, 114],
+  [108, 69], [69, 104], [104, 108], [33, 7], [7, 163], [163, 33],
+  [128, 47], [47, 100], [100, 128], [100, 47], [47, 114], [114, 100],
+  [104, 68], [68, 104], [69, 108], [108, 69], [151, 108], [108, 69],
+  [69, 151], [108, 151], [151, 337], [337, 108], [337, 151], [151, 107],
+  [107, 337], [336, 337], [337, 107], [107, 9], [9, 336], [107, 55],
+  [55, 8], [8, 107], [8, 285], [285, 8], [55, 8], [8, 193], [193, 55],
+  [55, 193], [193, 122], [122, 55], [55, 122], [122, 196], [196, 55],
+  [55, 196], [196, 3], [3, 55], [55, 3], [3, 51], [51, 55], [55, 51],
+  [51, 45], [45, 55], [55, 45], [45, 4], [4, 55], [55, 4], [4, 275],
+  [275, 55], [55, 275], [275, 281], [281, 55], [55, 281], [281, 248],
+  [248, 55], [55, 248], [248, 195], [195, 55], [55, 195], [195, 197],
+  [197, 55], [55, 197], [197, 5], [5, 55], [55, 5], [5, 49], [49, 55],
+  [55, 49], [49, 128], [128, 55], [55, 128], [128, 114], [114, 55],
+];
+
 interface Props {
   videoRef: React.RefObject<HTMLVideoElement>;
   canvasRef: React.RefObject<HTMLCanvasElement>;
@@ -15,7 +35,6 @@ export default function CameraView({ videoRef, canvasRef, onExpressionUpdate }: 
   const [cameraReady, setCameraReady] = useState(false);
   const meshCanvasRef = useRef<HTMLCanvasElement>(null);
 
-  // Start video after models load
   const startVideo = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: true });
@@ -32,12 +51,11 @@ export default function CameraView({ videoRef, canvasRef, onExpressionUpdate }: 
   };
 
   useEffect(() => {
-    // Load face-api models first
     const loadModels = async () => {
       try {
         await faceapi.nets.tinyFaceDetector.loadFromUri('/models');
         await faceapi.nets.faceExpressionNet.loadFromUri('/models');
-        startVideo(); // start camera after models
+        startVideo();
       } catch (e) {
         console.error("Model load failed", e);
       }
@@ -48,7 +66,6 @@ export default function CameraView({ videoRef, canvasRef, onExpressionUpdate }: 
   useEffect(() => {
     if (!cameraReady || !videoRef.current) return;
 
-    // face-api expression detection every 500ms
     const interval = setInterval(async () => {
       if (!videoRef.current) return;
       const detections = await faceapi
@@ -65,7 +82,6 @@ export default function CameraView({ videoRef, canvasRef, onExpressionUpdate }: 
       }
     }, 500);
 
-    // MediaPipe face mesh overlay
     const faceMesh = new FaceMesh({
       locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`,
     });
@@ -79,7 +95,7 @@ export default function CameraView({ videoRef, canvasRef, onExpressionUpdate }: 
         const canvasCtx = meshCanvasRef.current.getContext('2d');
         if (!canvasCtx) return;
         canvasCtx.clearRect(0, 0, meshCanvasRef.current.width, meshCanvasRef.current.height);
-        drawConnectors(canvasCtx, results.multiFaceLandmarks[0], FaceMesh.FACEMESH_TESSELATION, { color: '#3b82f680', lineWidth: 1 });
+        drawConnectors(canvasCtx, results.multiFaceLandmarks[0], FACEMESH_TESSELATION, { color: '#3b82f680', lineWidth: 1 });
         drawLandmarks(canvasCtx, results.multiFaceLandmarks[0], { color: '#3b82f6', lineWidth: 0.5 });
       }
     });
