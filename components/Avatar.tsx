@@ -1,97 +1,36 @@
 'use client';
-import { useState, useRef, useEffect } from 'react';
-import Avatar from '@/components/Avatar';
-import QuestionDisplay from '@/components/QuestionDisplay';
-import CameraView from '@/components/CameraView';
-import TranscriptBox from '@/components/TranscriptBox';
-import ControlPanel from '@/components/ControlPanel';
-import ExpressionBar from '@/components/ExpressionBar';
-import { useSpeechRecognition } from '@/hooks/useSpeechRecognition';
-import { useGroqExam } from '@/hooks/useGroqExam';
-import { useSnapshotSender } from '@/hooks/useSnapshotSender';
-import { evaluateFillerWords } from '@/utils/fillerCounter';
+import { useEffect, useRef } from 'react';
 
-export default function Home() {
-  const [examStarted, setExamStarted] = useState(false);
-  const [currentPart, setCurrentPart] = useState(1);
-  const [questions, setQuestions] = useState<string[]>([]);
-  const [questionIndex, setQuestionIndex] = useState(0);
-  const [isPaused, setIsPaused] = useState(false);
-  const [avatarSpeaking, setAvatarSpeaking] = useState(false);
-  const [expression, setExpression] = useState({
-    angry: 0, confident: 0, nervous: 0, lying: 0
-  });
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+interface Props {
+  speaking: boolean;
+}
 
-  const { transcript, resetTranscript, interim, fillerCount } = useSpeechRecognition(!isPaused && examStarted);
-  const { generateQuestion, evaluateAnswer } = useGroqExam();
-  useSnapshotSender(videoRef, canvasRef, examStarted && !isPaused);
+export default function Avatar({ speaking }: Props) {
+  const mouthRef = useRef<SVGPathElement>(null);
 
-  // Start exam
-  const startExam = async () => {
-    setExamStarted(true);
-    const qs = await generateQuestion(1, 0);
-    setQuestions(qs);
-    setQuestionIndex(0);
-  };
-
-  const handleNextQuestion = async () => {
-    const nextIdx = questionIndex + 1;
-    if (questions.length > nextIdx) {
-      setQuestionIndex(nextIdx);
-    } else {
-      // get next question from AI
-      const newQ = await generateQuestion(currentPart, nextIdx);
-      setQuestions((prev) => [...prev, ...newQ]);
-      setQuestionIndex(nextIdx);
+  useEffect(() => {
+    if (speaking) {
+      const interval = setInterval(() => {
+        if (mouthRef.current) {
+          mouthRef.current.setAttribute('ry', `${5 + Math.random() * 10}`);
+        }
+      }, 100);
+      return () => clearInterval(interval);
     }
-  };
-
-  const handlePartComplete = () => {
-    if (currentPart < 3) {
-      setCurrentPart((p) => p + 1);
-      setQuestions([]);
-      setQuestionIndex(0);
-    } else {
-      // exam finished -> evaluate
-    }
-  };
+  }, [speaking]);
 
   return (
-    <main className="min-h-screen flex flex-col items-center justify-center p-4">
-      {!examStarted ? (
-        <div className="text-center space-y-8">
-          <h1 className="text-5xl font-bold bg-gradient-to-r from-blue-400 to-purple-600 bg-clip-text text-transparent">
-            IELTS AI Speaking
-          </h1>
-          <button onClick={startExam} className="px-8 py-4 bg-accent rounded-full text-xl font-semibold hover:bg-blue-600 transition">
-            Start Exam
-          </button>
-        </div>
-      ) : (
-        <div className="w-full max-w-4xl grid grid-cols-1 md:grid-cols-3 gap-6">
-          <div className="md:col-span-2 space-y-6">
-            <Avatar speaking={avatarSpeaking} />
-            <QuestionDisplay question={questions[questionIndex]} part={currentPart} />
-            <TranscriptBox transcript={transcript} fillerCount={fillerCount} />
-            <ControlPanel
-              isPaused={isPaused}
-              onPause={() => setIsPaused(!isPaused)}
-              onNext={handleNextQuestion}
-              onRetake={() => resetTranscript()}
-            />
-          </div>
-          <div className="space-y-4">
-            <CameraView
-              videoRef={videoRef}
-              canvasRef={canvasRef}
-              onExpressionUpdate={setExpression}
-            />
-            <ExpressionBar expression={expression} />
-          </div>
-        </div>
-      )}
-    </main>
+    <div className="flex justify-center">
+      <svg viewBox="0 0 200 200" className="w-40 h-40 md:w-48 md:h-48 drop-shadow-xl">
+        <circle cx="100" cy="100" r="90" fill="#2a2a2a" stroke="#3b82f6" strokeWidth="3" />
+        {/* eyes */}
+        <circle cx="70" cy="80" r="12" fill="white" />
+        <circle cx="130" cy="80" r="12" fill="white" />
+        <circle cx="70" cy="80" r="7" fill="#0f0f0f" />
+        <circle cx="130" cy="80" r="7" fill="#0f0f0f" />
+        {/* mouth */}
+        <ellipse cx="100" cy="120" rx="25" ry="8" fill="#3b82f6" ref={mouthRef} />
+      </svg>
+    </div>
   );
 }
