@@ -1,5 +1,5 @@
 'use client';
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import Avatar from '@/components/Avatar';
 import QuestionDisplay from '@/components/QuestionDisplay';
 import CameraView from '@/components/CameraView';
@@ -12,7 +12,6 @@ import { useSnapshotSender } from '@/hooks/useSnapshotSender';
 import { sendLog } from '@/utils/sendLog';
 
 export default function Home() {
-  // sessionStorage থেকে state restore
   const [examStarted, setExamStarted] = useState(false);
   const [currentPart, setCurrentPart] = useState(1);
   const [questions, setQuestions] = useState<string[]>([]);
@@ -25,70 +24,82 @@ export default function Home() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
-  const { transcript, resetTranscript, fillerCount } = useSpeechRecognition(!isPaused && examStarted);
+  const micActive = !isPaused && examStarted;
+  const { transcript, resetTranscript, fillerCount } = useSpeechRecognition(micActive);
   const { generateQuestion, evaluateAnswer } = useGroqExam();
-  useSnapshotSender(videoRef, canvasRef, examStarted && !isPaused);
+  useSnapshotSender(videoRef, canvasRef, micActive);
 
-  // Save state to sessionStorage
+  const speak = useCallback((text: string) => {
+    if (!window.speechSynthesis || !text) return;
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(text);
+    const voices = window.speechSynthesis.getVoices();
+    const enVoice = voices.find(v => v.lang.startsWith('en'));
+    if (enVoice) utterance.voice = enVoice;
+    utterance.rate = 1;
+    utterance.pitch = 1;
+    utterance.onstart = () => setAvatarSpeaking(true);
+    utterance.onend = () => setAvatarSpeaking(false);
+    utterance.onerror = () => setAvatarSpeaking(false);
+    window.speechSynthesis.speak(utterance);
+  }, []);
+
+  useEffect(() => {
+    const q = questions[questionIndex];
+    if (examStarted && q && !isPaused) speak(q);
+  }, [questions, questionIndex, examStarted, isPaused, speak]);
+
+  // sessionStorage persist
   useEffect(() => {
     if (examStarted) {
       sessionStorage.setItem('examState', JSON.stringify({
-        examStarted,
-        currentPart,
-        questions,
-        questionIndex,
-        isPaused,
+        examStarted, currentPart, questions, questionIndex, isPaused,
       }));
     }
   }, [examStarted, currentPart, questions, questionIndex, isPaused]);
 
-  // Restore state on mount
   useEffect(() => {
     const saved = sessionStorage.getItem('examState');
     if (saved) {
-      const state = JSON.parse(saved);
-      setExamStarted(state.examStarted);
-      setCurrentPart(state.currentPart);
-      setQuestions(state.questions);
-      setQuestionIndex(state.questionIndex);
-      setIsPaused(state.isPaused);
+      const s = JSON.parse(saved);
+      setExamStarted(s.examStarted);
+      setCurrentPart(s.currentPart);
+      setQuestions(s.questions || []);
+      setQuestionIndex(s.questionIndex || 0);
+      setIsPaused(s.isPaused);
     }
   }, []);
 
   const startExam = async () => {
     setExamStarted(true);
-    try {
-      const qs = await generateQuestion(1, 0);
-      if (qs.length > 0) {
-        setQuestions(qs);
-        setQuestionIndex(0);
-        sendLog('Exam started successfully', 'info');
-      }
-    } catch (err: any) {
-      sendLog(`Start exam failed: ${err.message}`, 'error');
+    const qs = await generateQuestion(1, 0);
+    if (qs.length > 0) {
+      setQuestions(qs);
+      setQuestionIndex(0);
+      sendLog('Exam started', 'info');
     }
   };
 
-  const handleNextQuestion = async () => {
+  const handleNext = async () => {
+    window.speechSynthesis.cancel();
     const nextIdx = questionIndex + 1;
     if (questions.length > nextIdx) {
       setQuestionIndex(nextIdx);
     } else {
       const newQ = await generateQuestion(currentPart, nextIdx);
-      setQuestions((prev) => [...prev, ...newQ]);
+      setQuestions(prev => [...prev, ...newQ]);
       setQuestionIndex(nextIdx);
     }
   };
 
-  // Reset on tab close (optional)
   useEffect(() => {
-    const handleBeforeUnload = () => sessionStorage.removeItem('examState');
-    window.addEventListener('beforeunload', handleBeforeUnload);
-    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+    const before = () => sessionStorage.removeItem('examState');
+    window.addEventListener('beforeunload', before);
+    return () => window.removeEventListener('beforeunload', before);
   }, []);
 
   return (
-    <main className="min-h-screen flex flex-col items-center justify-center p-4 relative">
+    <main className="min-h-screen flex flex-col items-center justify-center p-4">
       {!examStarted ? (
         <div className="text-center space-y-8">
           <h1 className="text-5xl font-bold bg-gradient-to-r from-blue-400 to-purple-600 bg-clip-text text-transparent">
@@ -99,28 +110,51 @@ export default function Home() {
           </button>
         </div>
       ) : (
-        <div className="w-full max-w-4xl grid grid-cols-1 md:grid-cols-3 gap-6">
-          <div className="md:col-span-2 space-y-6">
-            <Avatar speaking={avatarSpeaking} />
+        <div className="w-full max-w-4xl flex flex-col gap-6">
+          {/* Top row: Avatar + small camera + mic indicator */}
+          <div className="flex items-center justify-between flex-wrap gap-4">
+            <div className="flex items-center gap-4">
+              <Avatar speaking={avatarSpeaking} />
+              <div className="flex flex-col items-center gap-1">
+                <div className="w-20 h-24 md:w-24 md:h-28">
+                  <CameraView
+                    videoRef={videoRef}
+                    canvasRef={canvasRef}
+                    onExpressionUpdate={setExpression}
+                  />
+                </div>
+                {micActive && (
+                  <span className="flex items-center gap-1 text-green-400 text-xs mt-1">
+                    <span className="relative flex h-2 w-2">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+                    </span>
+                    Listening
+                  </span>
+                )}
+              </div>
+            </div>
+            <ExpressionBar expression={expression} />
+          </div>
+
+          {/* Question + transcript + controls */}
+          <div className="space-y-6">
             <QuestionDisplay question={questions[questionIndex]} part={currentPart} />
             <TranscriptBox transcript={transcript} fillerCount={fillerCount} />
             <ControlPanel
               isPaused={isPaused}
-              onPause={() => setIsPaused(!isPaused)}
-              onNext={handleNextQuestion}
-              onRetake={() => resetTranscript()}
+              onPause={() => {
+                setIsPaused(!isPaused);
+                if (!isPaused) window.speechSynthesis.pause();
+                else window.speechSynthesis.resume();
+              }}
+              onNext={handleNext}
+              onRetake={() => {
+                resetTranscript();
+                const q = questions[questionIndex];
+                if (q) speak(q);
+              }}
             />
-          </div>
-          <div className="space-y-4 relative">
-            {/* ছোট ক্যামেরা absolute position */}
-            <div className="absolute top-2 right-2 w-24 h-32 z-10 rounded-xl overflow-hidden border-2 border-blue-500/50 shadow-lg bg-black">
-              <CameraView
-                videoRef={videoRef}
-                canvasRef={canvasRef}
-                onExpressionUpdate={setExpression}
-              />
-            </div>
-            <ExpressionBar expression={expression} />
           </div>
         </div>
       )}
