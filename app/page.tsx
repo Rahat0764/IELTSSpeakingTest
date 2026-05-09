@@ -9,6 +9,7 @@ import ExpressionBar from '@/components/ExpressionBar';
 import { useSpeechRecognition } from '@/hooks/useSpeechRecognition';
 import { useGroqExam } from '@/hooks/useGroqExam';
 import { useSnapshotSender } from '@/hooks/useSnapshotSender';
+import { useMicLevel } from '@/hooks/useMicLevel';
 import { sendLog } from '@/utils/sendLog';
 
 export default function Home() {
@@ -26,8 +27,15 @@ export default function Home() {
 
   const micActive = !isPaused && examStarted;
   const { transcript, resetTranscript, fillerCount } = useSpeechRecognition(micActive);
-  const { generateQuestion, evaluateAnswer } = useGroqExam();
+  const { generateQuestion } = useGroqExam();
   useSnapshotSender(videoRef, canvasRef, micActive);
+  const micLevel = useMicLevel(micActive);
+
+  // Draggable camera state
+  const [camPos, setCamPos] = useState({ x: 20, y: 20 });
+  const [dragging, setDragging] = useState(false);
+  const dragStart = useRef({ x: 0, y: 0 });
+  const camRef = useRef<HTMLDivElement>(null);
 
   const speak = useCallback((text: string) => {
     if (!window.speechSynthesis || !text) return;
@@ -49,7 +57,6 @@ export default function Home() {
     if (examStarted && q && !isPaused) speak(q);
   }, [questions, questionIndex, examStarted, isPaused, speak]);
 
-  // sessionStorage persist
   useEffect(() => {
     if (examStarted) {
       sessionStorage.setItem('examState', JSON.stringify({
@@ -92,14 +99,63 @@ export default function Home() {
     }
   };
 
+  // Drag handlers
+  const handleMouseDown = (e: React.MouseEvent) => {
+    e.preventDefault();
+    setDragging(true);
+    dragStart.current = { x: e.clientX - camPos.x, y: e.clientY - camPos.y };
+  };
+  const handleTouchStart = (e: React.TouchEvent) => {
+    e.preventDefault();
+    setDragging(true);
+    const touch = e.touches[0];
+    dragStart.current = { x: touch.clientX - camPos.x, y: touch.clientY - camPos.y };
+  };
+  const handleMouseMove = (e: MouseEvent) => {
+    if (!dragging) return;
+    setCamPos({ x: e.clientX - dragStart.current.x, y: e.clientY - dragStart.current.y });
+  };
+  const handleTouchMove = (e: TouchEvent) => {
+    if (!dragging) return;
+    const touch = e.touches[0];
+    setCamPos({ x: touch.clientX - dragStart.current.x, y: touch.clientY - dragStart.current.y });
+  };
+  const stopDrag = () => setDragging(false);
+
   useEffect(() => {
-    const before = () => sessionStorage.removeItem('examState');
-    window.addEventListener('beforeunload', before);
-    return () => window.removeEventListener('beforeunload', before);
-  }, []);
+    if (dragging) {
+      window.addEventListener('mousemove', handleMouseMove);
+      window.addEventListener('mouseup', stopDrag);
+      window.addEventListener('touchmove', handleTouchMove, { passive: false });
+      window.addEventListener('touchend', stopDrag);
+    }
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', stopDrag);
+      window.removeEventListener('touchmove', handleTouchMove);
+      window.removeEventListener('touchend', stopDrag);
+    };
+  }, [dragging]);
 
   return (
-    <main className="min-h-screen flex flex-col items-center justify-center p-4">
+    <main className="min-h-screen flex flex-col items-center justify-center p-4 relative">
+      {/* Draggable small camera */}
+      {examStarted && (
+        <div
+          ref={camRef}
+          className="absolute z-20 w-24 h-32 md:w-28 md:h-36 cursor-grab active:cursor-grabbing select-none"
+          style={{ left: camPos.x, top: camPos.y }}
+          onMouseDown={handleMouseDown}
+          onTouchStart={handleTouchStart}
+        >
+          <CameraView
+            videoRef={videoRef}
+            canvasRef={canvasRef}
+            onExpressionUpdate={setExpression}
+          />
+        </div>
+      )}
+
       {!examStarted ? (
         <div className="text-center space-y-8">
           <h1 className="text-5xl font-bold bg-gradient-to-r from-blue-400 to-purple-600 bg-clip-text text-transparent">
@@ -110,52 +166,49 @@ export default function Home() {
           </button>
         </div>
       ) : (
-        <div className="w-full max-w-4xl flex flex-col gap-6">
-          {/* Top row: Avatar + small camera + mic indicator */}
-          <div className="flex items-center justify-between flex-wrap gap-4">
-            <div className="flex items-center gap-4">
-              <Avatar speaking={avatarSpeaking} />
-              <div className="flex flex-col items-center gap-1">
-                <div className="w-20 h-24 md:w-24 md:h-28">
-                  <CameraView
-                    videoRef={videoRef}
-                    canvasRef={canvasRef}
-                    onExpressionUpdate={setExpression}
-                  />
-                </div>
-                {micActive && (
-                  <span className="flex items-center gap-1 text-green-400 text-xs mt-1">
-                    <span className="relative flex h-2 w-2">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
-                      <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
-                    </span>
-                    Listening
-                  </span>
-                )}
-              </div>
-            </div>
-            <ExpressionBar expression={expression} />
-          </div>
+        <div className="w-full max-w-4xl flex flex-col items-center gap-6">
+          {/* Avatar centered */}
+          <Avatar speaking={avatarSpeaking} />
 
-          {/* Question + transcript + controls */}
-          <div className="space-y-6">
-            <QuestionDisplay question={questions[questionIndex]} part={currentPart} />
-            <TranscriptBox transcript={transcript} fillerCount={fillerCount} />
-            <ControlPanel
-              isPaused={isPaused}
-              onPause={() => {
-                setIsPaused(!isPaused);
-                if (!isPaused) window.speechSynthesis.pause();
-                else window.speechSynthesis.resume();
-              }}
-              onNext={handleNext}
-              onRetake={() => {
-                resetTranscript();
-                const q = questions[questionIndex];
-                if (q) speak(q);
-              }}
-            />
-          </div>
+          {/* Question */}
+          <QuestionDisplay question={questions[questionIndex]} part={currentPart} />
+
+          {/* Transcript + mic level + filler */}
+          <TranscriptBox transcript={transcript} fillerCount={fillerCount} />
+          {micActive && (
+            <div className="flex items-center gap-2 text-green-400 text-sm">
+              <span className="relative flex h-3 w-3">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-3 w-3 bg-green-500"></span>
+              </span>
+              <span className="w-32 h-2 bg-gray-700 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-green-500 transition-all duration-75"
+                  style={{ width: `${Math.min(micLevel * 100, 100)}%` }}
+                />
+              </span>
+              <span>Listening</span>
+            </div>
+          )}
+
+          {/* Controls */}
+          <ControlPanel
+            isPaused={isPaused}
+            onPause={() => {
+              setIsPaused(!isPaused);
+              if (!isPaused) window.speechSynthesis.pause();
+              else window.speechSynthesis.resume();
+            }}
+            onNext={handleNext}
+            onRetake={() => {
+              resetTranscript();
+              const q = questions[questionIndex];
+              if (q) speak(q);
+            }}
+          />
+
+          {/* Emotion Detection at the bottom */}
+          <ExpressionBar expression={expression} />
         </div>
       )}
     </main>
