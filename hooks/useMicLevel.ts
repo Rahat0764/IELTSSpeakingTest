@@ -34,8 +34,9 @@ export function useMicLevel(active: boolean): number {
 
         const updateLevel = () => {
           if (!analyserRef.current || !dataArrayRef.current) return;
-          analyserRef.current.getByteFrequencyData(dataArrayRef.current);
-          const average = dataArrayRef.current.reduce((a, b) => a + b) / dataArrayRef.current.length;
+          // type assertion to bypass TS strict generic
+          (analyserRef.current as AnalyserNode).getByteFrequencyData(dataArrayRef.current as Uint8Array);
+          const average = (dataArrayRef.current as Uint8Array).reduce((a, b) => a + b) / dataArrayRef.current.length;
           const normalized = Math.min(average / 128, 1);
           setLevel(normalized);
           animationRef.current = requestAnimationFrame(updateLevel);
