@@ -1,0 +1,59 @@
+'use client';
+import { useState, useEffect, useRef } from 'react';
+import { evaluateFillerWords } from '@/utils/fillerCounter';
+
+interface SpeechRecognitionResult {
+  transcript: string;
+  interim: string;
+  fillerCount: number;
+  resetTranscript: () => void;
+}
+
+export function useSpeechRecognition(active: boolean): SpeechRecognitionResult {
+  const [transcript, setTranscript] = useState('');
+  const [interim, setInterim] = useState('');
+  const [fillerCount, setFillerCount] = useState(0);
+  const recognitionRef = useRef<any>(null);
+
+  useEffect(() => {
+    if (!active) {
+      recognitionRef.current?.stop();
+      return;
+    }
+
+    const SpeechRecognition = window.SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) return;
+
+    const recognition = new SpeechRecognition();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = 'en-US';
+
+    recognition.onresult = (event: any) => {
+      let i = '';
+      let f = '';
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const result = event.results[i];
+        if (result.isFinal) {
+          f += result[0].transcript;
+        } else {
+          i += result[0].transcript;
+        }
+      }
+      setTranscript((prev) => prev + f);
+      setInterim(i);
+      setFillerCount(evaluateFillerWords(transcript + f));
+    };
+
+    recognition.start();
+    recognitionRef.current = recognition;
+    return () => recognition.stop();
+  }, [active]);
+
+  const resetTranscript = () => {
+    setTranscript('');
+    setFillerCount(0);
+  };
+
+  return { transcript, interim, fillerCount, resetTranscript };
+}
