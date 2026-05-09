@@ -6,7 +6,7 @@ interface Props {
 }
 
 export default function Avatar({ speaking }: Props) {
-  const mouthRef = useRef<SVGPathElement>(null);
+  const mouthRef = useRef<SVGEllipseElement>(null); // ← ঠিক হলো
 
   useEffect(() => {
     if (speaking) {
