@@ -81,7 +81,7 @@ export default function CameraView({ videoRef, canvasRef, onExpressionUpdate }: 
     });
     faceMesh.setOptions({ maxNumFaces: 1, refineLandmarks: true, minDetectionConfidence: 0.5 });
     faceMesh.onResults((results) => {
-      // mesh drawing disabled in small view
+      // mesh drawing disabled
     });
     faceMeshRef.current = faceMesh;
 
@@ -104,7 +104,14 @@ export default function CameraView({ videoRef, canvasRef, onExpressionUpdate }: 
 
   return (
     <div className="relative w-full h-full rounded-xl overflow-hidden border border-blue-500/30 bg-black">
-      <video ref={videoRef} className="w-full h-full object-cover" muted playsInline />
+      {/* Mirror effect via scaleX(-1) */}
+      <video
+        ref={videoRef}
+        className="w-full h-full object-cover"
+        style={{ transform: 'scaleX(-1)' }}
+        muted
+        playsInline
+      />
       <canvas ref={canvasRef} className="hidden" />
       <canvas ref={meshCanvasRef} className="hidden" width={320} height={240} />
     </div>
