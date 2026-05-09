@@ -2,14 +2,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { evaluateFillerWords } from '@/utils/fillerCounter';
 
-interface SpeechRecognitionResult {
-  transcript: string;
-  interim: string;
-  fillerCount: number;
-  resetTranscript: () => void;
-}
-
-export function useSpeechRecognition(active: boolean): SpeechRecognitionResult {
+export function useSpeechRecognition(active: boolean) {
   const [transcript, setTranscript] = useState('');
   const [interim, setInterim] = useState('');
   const [fillerCount, setFillerCount] = useState(0);
@@ -21,7 +14,7 @@ export function useSpeechRecognition(active: boolean): SpeechRecognitionResult {
       return;
     }
 
-    const SpeechRecognition = window.SpeechRecognition || (window as any).webkitSpeechRecognition;
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRecognition) return;
 
     const recognition = new SpeechRecognition();
@@ -30,25 +23,28 @@ export function useSpeechRecognition(active: boolean): SpeechRecognitionResult {
     recognition.lang = 'en-US';
 
     recognition.onresult = (event: any) => {
-      let i = '';
-      let f = '';
+      let finalTranscript = '';
+      let inter = '';
       for (let i = event.resultIndex; i < event.results.length; i++) {
         const result = event.results[i];
         if (result.isFinal) {
-          f += result[0].transcript;
+          finalTranscript += result[0].transcript + ' ';
         } else {
-          i += result[0].transcript;
+          inter += result[0].transcript + ' ';
         }
       }
-      setTranscript((prev) => prev + f);
-      setInterim(i);
-      setFillerCount(evaluateFillerWords(transcript + f));
+      setTranscript((prev) => prev + finalTranscript);
+      setInterim(inter.trim());
+      setFillerCount(evaluateFillerWords(transcript + finalTranscript));
     };
 
     recognition.start();
     recognitionRef.current = recognition;
-    return () => recognition.stop();
-  }, [active]);
+
+    return () => {
+      recognition.stop();
+    };
+  }, [active, transcript]);
 
   const resetTranscript = () => {
     setTranscript('');
