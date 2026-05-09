@@ -5,7 +5,6 @@ import { FaceMesh } from '@mediapipe/face_mesh';
 import { Camera } from '@mediapipe/camera_utils';
 import { drawConnectors, drawLandmarks } from '@mediapipe/drawing_utils';
 
-// Face mesh tessellation connections
 const FACEMESH_TESSELATION = [
   [127, 34], [34, 139], [139, 127], [11, 37], [37, 67], [67, 11],
   [232, 231], [231, 120], [120, 232], [72, 37], [37, 39], [39, 72],
@@ -34,30 +33,25 @@ interface Props {
 export default function CameraView({ videoRef, canvasRef, onExpressionUpdate }: Props) {
   const [cameraReady, setCameraReady] = useState(false);
   const meshCanvasRef = useRef<HTMLCanvasElement>(null);
-
-  const startVideo = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        videoRef.current.onloadedmetadata = () => {
-          videoRef.current?.play();
-          setCameraReady(true);
-        };
-      }
-    } catch (err) {
-      console.error("Camera access denied");
-    }
-  };
+  const cameraRef = useRef<Camera | null>(null);
+  const faceMeshRef = useRef<FaceMesh | null>(null);
+  const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     const loadModels = async () => {
       try {
         await faceapi.nets.tinyFaceDetector.loadFromUri('/models');
         await faceapi.nets.faceExpressionNet.loadFromUri('/models');
-        startVideo();
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          videoRef.current.onloadedmetadata = () => {
+            videoRef.current?.play();
+            setCameraReady(true);
+          };
+        }
       } catch (e) {
-        console.error("Model load failed", e);
+        console.error("Camera load failed");
       }
     };
     loadModels();
@@ -66,7 +60,7 @@ export default function CameraView({ videoRef, canvasRef, onExpressionUpdate }: 
   useEffect(() => {
     if (!cameraReady || !videoRef.current) return;
 
-    const interval = setInterval(async () => {
+    intervalRef.current = setInterval(async () => {
       if (!videoRef.current) return;
       const detections = await faceapi
         .detectAllFaces(videoRef.current, new faceapi.TinyFaceDetectorOptions())
@@ -85,20 +79,11 @@ export default function CameraView({ videoRef, canvasRef, onExpressionUpdate }: 
     const faceMesh = new FaceMesh({
       locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`,
     });
-    faceMesh.setOptions({
-      maxNumFaces: 1,
-      refineLandmarks: true,
-      minDetectionConfidence: 0.5,
-    });
+    faceMesh.setOptions({ maxNumFaces: 1, refineLandmarks: true, minDetectionConfidence: 0.5 });
     faceMesh.onResults((results) => {
-      if (meshCanvasRef.current && results.multiFaceLandmarks.length > 0) {
-        const canvasCtx = meshCanvasRef.current.getContext('2d');
-        if (!canvasCtx) return;
-        canvasCtx.clearRect(0, 0, meshCanvasRef.current.width, meshCanvasRef.current.height);
-        drawConnectors(canvasCtx, results.multiFaceLandmarks[0], FACEMESH_TESSELATION as any, { color: '#3b82f680', lineWidth: 1 });
-        drawLandmarks(canvasCtx, results.multiFaceLandmarks[0], { color: '#3b82f6', lineWidth: 0.5 });
-      }
+      // mesh drawing disabled in small view
     });
+    faceMeshRef.current = faceMesh;
 
     const camera = new Camera(videoRef.current, {
       onFrame: async () => {
@@ -108,23 +93,20 @@ export default function CameraView({ videoRef, canvasRef, onExpressionUpdate }: 
       height: 240,
     });
     camera.start();
+    cameraRef.current = camera;
 
     return () => {
-      clearInterval(interval);
-      camera.stop();
+      if (intervalRef.current) clearInterval(intervalRef.current);
+      if (cameraRef.current) { cameraRef.current.stop(); cameraRef.current = null; }
+      if (faceMeshRef.current) { faceMeshRef.current.close(); faceMeshRef.current = null; }
     };
   }, [cameraReady]);
 
   return (
-    <div className="relative rounded-2xl overflow-hidden border border-blue-500/20">
-      <video ref={videoRef} className="w-full h-auto hidden" />
-      <canvas ref={canvasRef} className="w-full h-auto hidden" />
-      <canvas
-        ref={meshCanvasRef}
-        className="absolute top-0 left-0 w-full h-full"
-        width={320}
-        height={240}
-      />
+    <div className="relative w-full h-full rounded-xl overflow-hidden border border-blue-500/30 bg-black">
+      <video ref={videoRef} className="w-full h-full object-cover" muted playsInline />
+      <canvas ref={canvasRef} className="hidden" />
+      <canvas ref={meshCanvasRef} className="hidden" width={320} height={240} />
     </div>
   );
 }
