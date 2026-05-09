@@ -7,6 +7,7 @@ export function useSpeechRecognition(active: boolean) {
   const [interim, setInterim] = useState('');
   const [fillerCount, setFillerCount] = useState(0);
   const recognitionRef = useRef<any>(null);
+  const fullTranscriptRef = useRef('');
 
   useEffect(() => {
     if (!active) {
@@ -23,19 +24,22 @@ export function useSpeechRecognition(active: boolean) {
     recognition.lang = 'en-US';
 
     recognition.onresult = (event: any) => {
-      let finalTranscript = '';
+      let final = '';
       let inter = '';
       for (let i = event.resultIndex; i < event.results.length; i++) {
-        const result = event.results[i];
-        if (result.isFinal) {
-          finalTranscript += result[0].transcript + ' ';
+        const r = event.results[i];
+        if (r.isFinal) {
+          final += r[0].transcript + ' ';
         } else {
-          inter += result[0].transcript + ' ';
+          inter += r[0].transcript + ' ';
         }
       }
-      setTranscript((prev) => prev + finalTranscript);
+      if (final) {
+        fullTranscriptRef.current += final;
+        setTranscript(fullTranscriptRef.current);
+        setFillerCount(evaluateFillerWords(fullTranscriptRef.current));
+      }
       setInterim(inter.trim());
-      setFillerCount(evaluateFillerWords(transcript + finalTranscript));
     };
 
     recognition.start();
@@ -44,9 +48,10 @@ export function useSpeechRecognition(active: boolean) {
     return () => {
       recognition.stop();
     };
-  }, [active, transcript]);
+  }, [active]); // ✅ transcript dependency removed
 
   const resetTranscript = () => {
+    fullTranscriptRef.current = '';
     setTranscript('');
     setFillerCount(0);
   };
