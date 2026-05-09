@@ -1,0 +1,44 @@
+import { NextResponse } from 'next/server';
+import Groq from 'groq-sdk';
+
+async function getGroqClient(): Promise<Groq> {
+  const keys = (process.env.GROQ_API_KEYS || '').split(',').map(k => k.trim()).filter(Boolean);
+  for (const key of keys) {
+    try {
+      const client = new Groq({ apiKey: key });
+      await client.chat.completions.create({
+        model: 'llama-3.3-70b-versatile',
+        messages: [{ role: 'user', content: 'ping' }],
+        max_tokens: 1,
+      });
+      return client;
+    } catch (e: any) {
+      if (e?.status === 429) continue;
+      throw e;
+    }
+  }
+  throw new Error('All Groq keys exhausted');
+}
+
+export async function POST(request: Request) {
+  const { part, index } = await request.json();
+  const prompts: Record<number, string> = {
+    1: 'You are an IELTS examiner. Generate 1 short, friendly Part 1 introduction question (e.g., about hobbies, work, hometown). Return JSON: { "questions": ["question"] }',
+    2: 'You are an IELTS examiner. Generate 1 Part 2 cue card topic with bullet points. Return JSON: { "questions": ["Describe a memorable trip..."] }',
+    3: 'You are an IELTS examiner. Generate 1 abstract Part 3 follow-up question. Return JSON: { "questions": ["question"] }',
+  };
+
+  try {
+    const client = await getGroqClient();
+    const completion = await client.chat.completions.create({
+      model: 'llama-3.3-70b-versatile',
+      messages: [{ role: 'system', content: prompts[part] || prompts[1] }],
+      response_format: { type: 'json_object' },
+    });
+    const content = completion.choices[0].message.content;
+    const parsed = JSON.parse(content || '{"questions":[]}');
+    return NextResponse.json(parsed);
+  } catch {
+    return NextResponse.json({ questions: ['Could you repeat that?'] });
+  }
+}
