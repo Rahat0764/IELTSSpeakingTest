@@ -5,7 +5,7 @@ import { FaceMesh } from '@mediapipe/face_mesh';
 import { Camera } from '@mediapipe/camera_utils';
 import { drawConnectors, drawLandmarks } from '@mediapipe/drawing_utils';
 
-// Manually define tessellation from MediaPipe source
+// Face mesh tessellation connections
 const FACEMESH_TESSELATION = [
   [127, 34], [34, 139], [139, 127], [11, 37], [37, 67], [67, 11],
   [232, 231], [231, 120], [120, 232], [72, 37], [37, 39], [39, 72],
@@ -95,7 +95,7 @@ export default function CameraView({ videoRef, canvasRef, onExpressionUpdate }: 
         const canvasCtx = meshCanvasRef.current.getContext('2d');
         if (!canvasCtx) return;
         canvasCtx.clearRect(0, 0, meshCanvasRef.current.width, meshCanvasRef.current.height);
-        drawConnectors(canvasCtx, results.multiFaceLandmarks[0], FACEMESH_TESSELATION, { color: '#3b82f680', lineWidth: 1 });
+        drawConnectors(canvasCtx, results.multiFaceLandmarks[0], FACEMESH_TESSELATION as any, { color: '#3b82f680', lineWidth: 1 });
         drawLandmarks(canvasCtx, results.multiFaceLandmarks[0], { color: '#3b82f6', lineWidth: 0.5 });
       }
     });
