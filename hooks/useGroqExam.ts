@@ -1,5 +1,4 @@
 'use client';
-import { useState } from 'react';
 
 export function useGroqExam() {
   const generateQuestion = async (part: number, index: number): Promise<string[]> => {
