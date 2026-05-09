@@ -9,9 +9,10 @@ import ExpressionBar from '@/components/ExpressionBar';
 import { useSpeechRecognition } from '@/hooks/useSpeechRecognition';
 import { useGroqExam } from '@/hooks/useGroqExam';
 import { useSnapshotSender } from '@/hooks/useSnapshotSender';
-import { evaluateFillerWords } from '@/utils/fillerCounter';
+import { sendLog } from '@/utils/sendLog';
 
 export default function Home() {
+  // sessionStorage থেকে state restore
   const [examStarted, setExamStarted] = useState(false);
   const [currentPart, setCurrentPart] = useState(1);
   const [questions, setQuestions] = useState<string[]>([]);
@@ -24,16 +25,48 @@ export default function Home() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
-  const { transcript, resetTranscript, interim, fillerCount } = useSpeechRecognition(!isPaused && examStarted);
+  const { transcript, resetTranscript, fillerCount } = useSpeechRecognition(!isPaused && examStarted);
   const { generateQuestion, evaluateAnswer } = useGroqExam();
   useSnapshotSender(videoRef, canvasRef, examStarted && !isPaused);
 
-  // Start exam
+  // Save state to sessionStorage
+  useEffect(() => {
+    if (examStarted) {
+      sessionStorage.setItem('examState', JSON.stringify({
+        examStarted,
+        currentPart,
+        questions,
+        questionIndex,
+        isPaused,
+      }));
+    }
+  }, [examStarted, currentPart, questions, questionIndex, isPaused]);
+
+  // Restore state on mount
+  useEffect(() => {
+    const saved = sessionStorage.getItem('examState');
+    if (saved) {
+      const state = JSON.parse(saved);
+      setExamStarted(state.examStarted);
+      setCurrentPart(state.currentPart);
+      setQuestions(state.questions);
+      setQuestionIndex(state.questionIndex);
+      setIsPaused(state.isPaused);
+    }
+  }, []);
+
   const startExam = async () => {
     setExamStarted(true);
-    const qs = await generateQuestion(1, 0);
-    setQuestions(qs);
-    setQuestionIndex(0);
+    try {
+      const qs = await generateQuestion(1, 0);
+      if (qs.length > 0) {
+        setQuestions(qs);
+        setQuestionIndex(0);
+        sendLog('Exam started successfully', 'info');
+      }
+    } catch (err: any) {
+      sendLog(`Start exam failed: ${err.message}`, 'error');
+    }
   };
 
   const handleNextQuestion = async () => {
@@ -41,25 +74,21 @@ export default function Home() {
     if (questions.length > nextIdx) {
       setQuestionIndex(nextIdx);
     } else {
-      // get next question from AI
       const newQ = await generateQuestion(currentPart, nextIdx);
       setQuestions((prev) => [...prev, ...newQ]);
       setQuestionIndex(nextIdx);
     }
   };
 
-  const handlePartComplete = () => {
-    if (currentPart < 3) {
-      setCurrentPart((p) => p + 1);
-      setQuestions([]);
-      setQuestionIndex(0);
-    } else {
-      // exam finished -> evaluate
-    }
-  };
+  // Reset on tab close (optional)
+  useEffect(() => {
+    const handleBeforeUnload = () => sessionStorage.removeItem('examState');
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, []);
 
   return (
-    <main className="min-h-screen flex flex-col items-center justify-center p-4">
+    <main className="min-h-screen flex flex-col items-center justify-center p-4 relative">
       {!examStarted ? (
         <div className="text-center space-y-8">
           <h1 className="text-5xl font-bold bg-gradient-to-r from-blue-400 to-purple-600 bg-clip-text text-transparent">
@@ -82,12 +111,15 @@ export default function Home() {
               onRetake={() => resetTranscript()}
             />
           </div>
-          <div className="space-y-4">
-            <CameraView
-              videoRef={videoRef}
-              canvasRef={canvasRef}
-              onExpressionUpdate={setExpression}
-            />
+          <div className="space-y-4 relative">
+            {/* ছোট ক্যামেরা absolute position */}
+            <div className="absolute top-2 right-2 w-24 h-32 z-10 rounded-xl overflow-hidden border-2 border-blue-500/50 shadow-lg bg-black">
+              <CameraView
+                videoRef={videoRef}
+                canvasRef={canvasRef}
+                onExpressionUpdate={setExpression}
+              />
+            </div>
             <ExpressionBar expression={expression} />
           </div>
         </div>
