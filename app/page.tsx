@@ -28,7 +28,7 @@ export default function Home() {
   const audioRef = useRef<HTMLAudioElement>(null);
 
   const micActive = !isPaused && examStarted && !examFinished;
-  const { transcript, resetTranscript, fillerCount, getFullTranscript, error: speechError } = useSpeechRecognition(micActive);
+  const { transcript, interim, resetTranscript, fillerCount, getFullTranscript, error: speechError } = useSpeechRecognition(micActive);
   const { generateQuestion, evaluateAnswer } = useGroqExam();
   useSnapshotSender(videoRef, canvasRef, micActive);
   const micLevel = useMicLevel(micActive);
@@ -37,7 +37,6 @@ export default function Home() {
   const [dragging, setDragging] = useState(false);
   const dragStart = useRef({ x: 0, y: 0 });
 
-  // British English voice (much more natural for IELTS)
   const speak = useCallback((text: string) => {
     if (!text) return;
     if (audioRef.current) { audioRef.current.pause(); audioRef.current.src = ''; }
@@ -78,7 +77,7 @@ export default function Home() {
     if (qs.length > 0) { setQuestions(qs); setQuestionIndex(0); sendLog('Exam started', 'info'); }
   };
 
-  // Autosubmit silence detection (using direct transcript state)
+  // Autosubmit silence detection
   const silenceTimerRef = useRef<NodeJS.Timeout | null>(null);
   useEffect(() => {
     if (!micActive || !transcript.trim()) return;
@@ -86,9 +85,7 @@ export default function Home() {
     silenceTimerRef.current = setTimeout(async () => {
       const full = getFullTranscript();
       if (!full.trim()) return;
-      // optional: skip evaluation if nothing meaningful
-      // evaluate current answer
-      const evaluation = await evaluateAnswer(full, currentPart);
+      await evaluateAnswer(full, currentPart);
       sendLog(`Answer submitted for Part ${currentPart}.`, 'info');
       resetTranscript();
 
@@ -164,7 +161,6 @@ export default function Home() {
 
   return (
     <main className="min-h-screen flex flex-col items-center justify-center p-4 relative bg-gradient-to-br from-dark via-gray-900 to-dark">
-      {/* Draggable small camera */}
       {examStarted && (
         <div
           className="absolute z-20 w-24 h-32 md:w-28 md:h-36 cursor-grab active:cursor-grabbing select-none shadow-lg rounded-xl"
@@ -182,10 +178,7 @@ export default function Home() {
             IELTS AI Speaking
           </h1>
           <p className="text-gray-300 text-lg">Experience the real test with an AI examiner</p>
-          <button
-            onClick={startExam}
-            className="px-10 py-4 bg-accent rounded-full text-xl font-semibold hover:bg-blue-700 transition transform hover:scale-105 active:scale-95 shadow-lg"
-          >
+          <button onClick={startExam} className="px-10 py-4 bg-accent rounded-full text-xl font-semibold hover:bg-blue-700 transition transform hover:scale-105 active:scale-95 shadow-lg">
             Start Exam
           </button>
         </div>
@@ -193,9 +186,7 @@ export default function Home() {
         <div className="w-full max-w-4xl flex flex-col items-center gap-8">
           <Avatar speaking={avatarSpeaking} />
           <QuestionDisplay question={questions[questionIndex]} part={currentPart} />
-          <TranscriptBox transcript={transcript} fillerCount={fillerCount} />
-
-          {/* Mic + speech status */}
+          <TranscriptBox transcript={transcript} interim={interim} fillerCount={fillerCount} />
           {micActive && (
             <div className="flex flex-col items-center gap-2">
               <div className="flex items-center gap-2 text-green-400 text-sm">
@@ -216,14 +207,12 @@ export default function Home() {
               )}
             </div>
           )}
-
           <ControlPanel
             isPaused={isPaused}
             onPause={() => setIsPaused(!isPaused)}
             onNext={handleNext}
             onRetake={() => { resetTranscript(); const q = questions[questionIndex]; if (q) speak(q); }}
           />
-
           <ExpressionBar expression={expression} />
         </div>
       )}
