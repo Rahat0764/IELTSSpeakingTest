@@ -27,7 +27,8 @@ export default function Home() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
 
-  const micActive = !isPaused && examStarted && !examFinished;
+  // AI কথা বলার সময় মাইক্রোফোন সম্পূর্ণ নিষ্ক্রিয়
+  const micActive = !isPaused && examStarted && !examFinished && !avatarSpeaking;
   const { transcript, interim, resetTranscript, fillerCount, getFullTranscript, error: speechError } = useSpeechRecognition(micActive);
   const { generateQuestion, evaluateAnswer } = useGroqExam();
   useSnapshotSender(videoRef, canvasRef, micActive);
@@ -77,10 +78,11 @@ export default function Home() {
     if (qs.length > 0) { setQuestions(qs); setQuestionIndex(0); sendLog('Exam started', 'info'); }
   };
 
-  // Autosubmit silence detection
+  // Autosubmit silence detection (includ interim)
   const silenceTimerRef = useRef<NodeJS.Timeout | null>(null);
   useEffect(() => {
-    if (!micActive || !transcript.trim()) return;
+    const currentText = transcript + interim;
+    if (!micActive || !currentText.trim()) return;
     if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
     silenceTimerRef.current = setTimeout(async () => {
       const full = getFullTranscript();
@@ -94,7 +96,7 @@ export default function Home() {
         setQuestionIndex(nextIdx);
       } else {
         if (currentPart < 3) {
-          const newQ = await generateQuestion(currentPart, nextIdx);
+          const newQ = await generateQuestion(currentPart + 1, nextIdx);
           if (newQ.length) {
             setQuestions(prev => {
               const updated = [...prev, ...newQ];
@@ -113,7 +115,7 @@ export default function Home() {
     }, 3000);
 
     return () => { if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current); };
-  }, [transcript, micActive]);
+  }, [transcript, interim, micActive]);
 
   const handleNext = () => {
     if (audioRef.current) { audioRef.current.pause(); audioRef.current.src = ''; }
@@ -152,9 +154,7 @@ export default function Home() {
   if (examFinished) {
     return (
       <main className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-dark via-gray-900 to-dark">
-        <div className="animate-fadeIn">
-          <ScoreReport report={scoreReport} />
-        </div>
+        <ScoreReport report={scoreReport} />
       </main>
     );
   }
@@ -162,25 +162,16 @@ export default function Home() {
   return (
     <main className="min-h-screen flex flex-col items-center justify-center p-4 relative bg-gradient-to-br from-dark via-gray-900 to-dark">
       {examStarted && (
-        <div
-          className="absolute z-20 w-24 h-32 md:w-28 md:h-36 cursor-grab active:cursor-grabbing select-none shadow-lg rounded-xl"
+        <div className="absolute z-20 w-24 h-32 md:w-28 md:h-36 cursor-grab active:cursor-grabbing select-none shadow-lg rounded-xl"
           style={{ left: camPos.x, top: camPos.y }}
-          onMouseDown={handleMouseDown}
-          onTouchStart={handleTouchStart}
-        >
+          onMouseDown={handleMouseDown} onTouchStart={handleTouchStart}>
           <CameraView videoRef={videoRef} canvasRef={canvasRef} onExpressionUpdate={setExpression} />
         </div>
       )}
-
       {!examStarted ? (
         <div className="text-center space-y-8 backdrop-blur-lg bg-white/5 p-10 rounded-3xl shadow-2xl border border-white/10">
-          <h1 className="text-6xl font-extrabold bg-gradient-to-r from-blue-400 to-purple-600 bg-clip-text text-transparent drop-shadow-lg">
-            IELTS AI Speaking
-          </h1>
-          <p className="text-gray-300 text-lg">Experience the real test with an AI examiner</p>
-          <button onClick={startExam} className="px-10 py-4 bg-accent rounded-full text-xl font-semibold hover:bg-blue-700 transition transform hover:scale-105 active:scale-95 shadow-lg">
-            Start Exam
-          </button>
+          <h1 className="text-6xl font-extrabold bg-gradient-to-r from-blue-400 to-purple-600 bg-clip-text text-transparent drop-shadow-lg">IELTS AI Speaking</h1>
+          <button onClick={startExam} className="px-10 py-4 bg-accent rounded-full text-xl font-semibold hover:bg-blue-700 transition transform hover:scale-105 active:scale-95 shadow-lg">Start Exam</button>
         </div>
       ) : (
         <div className="w-full max-w-4xl flex flex-col items-center gap-8">
@@ -190,21 +181,11 @@ export default function Home() {
           {micActive && (
             <div className="flex flex-col items-center gap-2">
               <div className="flex items-center gap-2 text-green-400 text-sm">
-                <span className="relative flex h-3 w-3">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-3 w-3 bg-green-500"></span>
-                </span>
-                <span className="w-32 h-2 bg-gray-700 rounded-full overflow-hidden">
-                  <div className="h-full bg-green-500 transition-all duration-75" style={{ width: `${Math.min(micLevel * 100, 100)}%` }} />
-                </span>
+                <span className="relative flex h-3 w-3"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"/><span className="relative inline-flex rounded-full h-3 w-3 bg-green-500"/></span>
+                <span className="w-32 h-2 bg-gray-700 rounded-full overflow-hidden"><div className="h-full bg-green-500 transition-all duration-75" style={{ width: `${Math.min(micLevel*100,100)}%` }}/></span>
                 <span>Listening</span>
               </div>
-              {speechError && (
-                <p className="text-red-400 text-xs bg-red-900/30 px-3 py-1 rounded-full">{speechError}</p>
-              )}
-              {!speechError && transcript.length > 0 && (
-                <p className="text-xs text-gray-400">Response will auto‑submit after 3s of silence.</p>
-              )}
+              {speechError && <p className="text-red-400 text-xs bg-red-900/30 px-3 py-1 rounded-full">{speechError}</p>}
             </div>
           )}
           <ControlPanel
