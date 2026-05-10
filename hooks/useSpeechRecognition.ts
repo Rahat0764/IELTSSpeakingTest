@@ -14,10 +14,8 @@ export function useSpeechRecognition(active: boolean) {
       recognitionRef.current?.stop();
       return;
     }
-
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRecognition) return;
-
     const recognition = new SpeechRecognition();
     recognition.continuous = true;
     recognition.interimResults = true;
@@ -28,11 +26,8 @@ export function useSpeechRecognition(active: boolean) {
       let inter = '';
       for (let i = event.resultIndex; i < event.results.length; i++) {
         const r = event.results[i];
-        if (r.isFinal) {
-          final += r[0].transcript + ' ';
-        } else {
-          inter += r[0].transcript + ' ';
-        }
+        if (r.isFinal) final += r[0].transcript + ' ';
+        else inter += r[0].transcript + ' ';
       }
       if (final) {
         fullTranscriptRef.current += final;
@@ -41,14 +36,10 @@ export function useSpeechRecognition(active: boolean) {
       }
       setInterim(inter.trim());
     };
-
     recognition.start();
     recognitionRef.current = recognition;
-
-    return () => {
-      recognition.stop();
-    };
-  }, [active]); // ✅ transcript dependency removed
+    return () => recognition.stop();
+  }, [active]);
 
   const resetTranscript = () => {
     fullTranscriptRef.current = '';
@@ -56,5 +47,6 @@ export function useSpeechRecognition(active: boolean) {
     setFillerCount(0);
   };
 
-  return { transcript, interim, fillerCount, resetTranscript };
+  const getFullTranscript = () => fullTranscriptRef.current;
+  return { transcript, interim, fillerCount, resetTranscript, getFullTranscript };
 }
