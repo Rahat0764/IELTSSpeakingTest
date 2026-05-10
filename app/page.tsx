@@ -76,7 +76,7 @@ export default function Home() {
     if (qs.length > 0) { setQuestions(qs); setQuestionIndex(0); sendLog('Exam started', 'info'); }
   };
 
-  // Autosubmit when silence exceeds 3 sec (only if some transcript exists)
+  // Autosubmit silence detection
   const silenceTimerRef = useRef<NodeJS.Timeout | null>(null);
   useEffect(() => {
     if (!micActive || !transcript.trim()) return;
@@ -84,25 +84,30 @@ export default function Home() {
     silenceTimerRef.current = setTimeout(async () => {
       const full = getFullTranscript();
       if (!full.trim()) return;
-      const evaluation = await evaluateAnswer(full, currentPart);
-      // Save report per part? We'll combine later; for now we just move on.
+      await evaluateAnswer(full, currentPart);
       sendLog(`Answer submitted for Part ${currentPart}.`, 'info');
       resetTranscript();
-      // Go to next question / part
+
+      // Determine next question index and part
       const nextIdx = questionIndex + 1;
       if (questions.length > nextIdx) {
         setQuestionIndex(nextIdx);
       } else {
-        // next question from AI
+        // need new questions
         if (currentPart < 3) {
           const newQ = await generateQuestion(currentPart, nextIdx);
           if (newQ.length) {
-            setQuestions(prev => [...prev, ...newQ]);
-            setQuestionIndex(prevQuestions => prevQuestions.length); // pointer ahead
+            // New questions appended
+            setQuestions(prev => {
+              const updated = [...prev, ...newQ];
+              // Set index to last added
+              setQuestionIndex(updated.length - 1);
+              return updated;
+            });
           }
         } else {
-          // finish exam
-          const finalEval = await evaluateAnswer(full, currentPart); // last answer eval
+          // Exam finish – evaluate last answer and show report
+          const finalEval = await evaluateAnswer(full, currentPart);
           setScoreReport(finalEval);
           setExamFinished(true);
           setIsPaused(true);
@@ -110,7 +115,6 @@ export default function Home() {
         }
       }
     }, 3000);
-
     return () => { if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current); };
   }, [transcript, micActive]);
 
@@ -122,13 +126,16 @@ export default function Home() {
       setQuestionIndex(nextIdx);
     } else {
       generateQuestion(currentPart, nextIdx).then(newQ => {
-        setQuestions(prev => [...prev, ...newQ]);
-        setQuestionIndex(prevQuestions => prevQuestions.length);
+        setQuestions(prev => {
+          const updated = [...prev, ...newQ];
+          setQuestionIndex(updated.length - 1);
+          return updated;
+        });
       });
     }
   };
 
-  // Drag handlers (omitted for brevity, unchanged from before)
+  // Drag handlers
   const handleMouseDown = (e: React.MouseEvent) => { e.preventDefault(); setDragging(true); dragStart.current = { x: e.clientX - camPos.x, y: e.clientY - camPos.y }; };
   const handleTouchStart = (e: React.TouchEvent) => { e.preventDefault(); setDragging(true); const t = e.touches[0]; dragStart.current = { x: t.clientX - camPos.x, y: t.clientY - camPos.y }; };
   const handleMouseMove = (e: MouseEvent) => { if (!dragging) return; setCamPos({ x: e.clientX - dragStart.current.x, y: e.clientY - dragStart.current.y }); };
