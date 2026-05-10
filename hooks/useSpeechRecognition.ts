@@ -26,7 +26,7 @@ export function useSpeechRecognition(active: boolean) {
     const recognition = new SpeechRecognition();
     recognition.continuous = true;
     recognition.interimResults = true;
-    recognition.lang = 'en-GB'; // British English for IELTS
+    recognition.lang = 'en-GB'; // IELTS British English
 
     recognition.onresult = (event: any) => {
       let final = '';
@@ -43,7 +43,7 @@ export function useSpeechRecognition(active: boolean) {
         setError(null);
       }
 
-      // Always show current full transcript + interim
+      // সবসময় ফাইনাল + চলতি টেক্সট দেখানো
       setTranscript(fullTranscriptRef.current);
       setInterim(inter.trim());
     };
@@ -57,18 +57,22 @@ export function useSpeechRecognition(active: boolean) {
       }
     };
 
-    // Restart if it stops unexpectedly (except manual stop)
+    // Unexpected stop হলে আবার চালু
     recognition.onend = () => {
       if (active && recognitionRef.current === recognition) {
         try { recognition.start(); } catch (e) {}
       }
     };
 
-    recognition.start();
-    recognitionRef.current = recognition;
+    try {
+      recognition.start();
+      recognitionRef.current = recognition;
+    } catch (e) {
+      setError('Failed to start speech recognition.');
+    }
 
     return () => {
-      recognition.onend = null; // prevent restart after unmount
+      recognition.onend = null;
       recognition.stop();
     };
   }, [active]);
@@ -81,6 +85,8 @@ export function useSpeechRecognition(active: boolean) {
     setError(null);
   };
 
-  const getFullTranscript = () => fullTranscriptRef.current;
+  // Final + current interim ফেরত দেয়
+  const getFullTranscript = () => (fullTranscriptRef.current + ' ' + interim).trim();
+
   return { transcript, interim, fillerCount, error, resetTranscript, getFullTranscript };
 }
