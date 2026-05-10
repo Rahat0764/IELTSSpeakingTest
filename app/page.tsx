@@ -6,6 +6,7 @@ import CameraView from '@/components/CameraView';
 import TranscriptBox from '@/components/TranscriptBox';
 import ControlPanel from '@/components/ControlPanel';
 import ExpressionBar from '@/components/ExpressionBar';
+import ScoreReport from '@/components/ScoreReport';
 import { useSpeechRecognition } from '@/hooks/useSpeechRecognition';
 import { useGroqExam } from '@/hooks/useGroqExam';
 import { useSnapshotSender } from '@/hooks/useSnapshotSender';
@@ -19,32 +20,26 @@ export default function Home() {
   const [questionIndex, setQuestionIndex] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
   const [avatarSpeaking, setAvatarSpeaking] = useState(false);
-  const [expression, setExpression] = useState({
-    angry: 0, confident: 0, nervous: 0, lying: 0
-  });
+  const [expression, setExpression] = useState({ angry: 0, confident: 0, nervous: 0, lying: 0 });
+  const [examFinished, setExamFinished] = useState(false);
+  const [scoreReport, setScoreReport] = useState<any>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
 
-  const micActive = !isPaused && examStarted;
-  const { transcript, resetTranscript, fillerCount } = useSpeechRecognition(micActive);
-  const { generateQuestion } = useGroqExam();
+  const micActive = !isPaused && examStarted && !examFinished;
+  const { transcript, resetTranscript, fillerCount, getFullTranscript } = useSpeechRecognition(micActive);
+  const { generateQuestion, evaluateAnswer } = useGroqExam();
   useSnapshotSender(videoRef, canvasRef, micActive);
   const micLevel = useMicLevel(micActive);
 
-  // Draggable camera
   const [camPos, setCamPos] = useState({ x: 20, y: 20 });
   const [dragging, setDragging] = useState(false);
   const dragStart = useRef({ x: 0, y: 0 });
 
   const speak = useCallback((text: string) => {
     if (!text) return;
-    // Stop any current audio
-    if (audioRef.current) {
-      audioRef.current.pause();
-      audioRef.current.src = '';
-    }
-    // Use Google Translate TTS via our API
+    if (audioRef.current) { audioRef.current.pause(); audioRef.current.src = ''; }
     const url = `/api/tts?text=${encodeURIComponent(text)}&lang=en`;
     const audio = new Audio(url);
     audio.onplay = () => setAvatarSpeaking(true);
@@ -56,18 +51,13 @@ export default function Home() {
 
   useEffect(() => {
     const q = questions[questionIndex];
-    if (examStarted && q && !isPaused) speak(q);
-  }, [questions, questionIndex, examStarted, isPaused, speak]);
+    if (examStarted && !examFinished && q && !isPaused) speak(q);
+  }, [questions, questionIndex, examStarted, examFinished, isPaused, speak]);
 
-  // sessionStorage persist ...
+  // sessionStorage
   useEffect(() => {
-    if (examStarted) {
-      sessionStorage.setItem('examState', JSON.stringify({
-        examStarted, currentPart, questions, questionIndex, isPaused,
-      }));
-    }
+    if (examStarted) sessionStorage.setItem('examState', JSON.stringify({ examStarted, currentPart, questions, questionIndex, isPaused }));
   }, [examStarted, currentPart, questions, questionIndex, isPaused]);
-
   useEffect(() => {
     const saved = sessionStorage.getItem('examState');
     if (saved) {
@@ -83,91 +73,99 @@ export default function Home() {
   const startExam = async () => {
     setExamStarted(true);
     const qs = await generateQuestion(1, 0);
-    if (qs.length > 0) {
-      setQuestions(qs);
-      setQuestionIndex(0);
-      sendLog('Exam started', 'info');
-    }
+    if (qs.length > 0) { setQuestions(qs); setQuestionIndex(0); sendLog('Exam started', 'info'); }
   };
 
-  const handleNext = async () => {
-    if (audioRef.current) {
-      audioRef.current.pause();
-      audioRef.current.src = '';
-    }
+  // Autosubmit when silence exceeds 3 sec (only if some transcript exists)
+  const silenceTimerRef = useRef<NodeJS.Timeout | null>(null);
+  useEffect(() => {
+    if (!micActive || !transcript.trim()) return;
+    if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+    silenceTimerRef.current = setTimeout(async () => {
+      const full = getFullTranscript();
+      if (!full.trim()) return;
+      const evaluation = await evaluateAnswer(full, currentPart);
+      // Save report per part? We'll combine later; for now we just move on.
+      sendLog(`Answer submitted for Part ${currentPart}.`, 'info');
+      resetTranscript();
+      // Go to next question / part
+      const nextIdx = questionIndex + 1;
+      if (questions.length > nextIdx) {
+        setQuestionIndex(nextIdx);
+      } else {
+        // next question from AI
+        if (currentPart < 3) {
+          const newQ = await generateQuestion(currentPart, nextIdx);
+          if (newQ.length) {
+            setQuestions(prev => [...prev, ...newQ]);
+            setQuestionIndex(prevQuestions => prevQuestions.length); // pointer ahead
+          }
+        } else {
+          // finish exam
+          const finalEval = await evaluateAnswer(full, currentPart); // last answer eval
+          setScoreReport(finalEval);
+          setExamFinished(true);
+          setIsPaused(true);
+          sendLog('Exam finished.', 'info');
+        }
+      }
+    }, 3000);
+
+    return () => { if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current); };
+  }, [transcript, micActive]);
+
+  const handleNext = () => {
+    if (audioRef.current) { audioRef.current.pause(); audioRef.current.src = ''; }
+    resetTranscript();
     const nextIdx = questionIndex + 1;
     if (questions.length > nextIdx) {
       setQuestionIndex(nextIdx);
     } else {
-      const newQ = await generateQuestion(currentPart, nextIdx);
-      setQuestions(prev => [...prev, ...newQ]);
-      setQuestionIndex(nextIdx);
+      generateQuestion(currentPart, nextIdx).then(newQ => {
+        setQuestions(prev => [...prev, ...newQ]);
+        setQuestionIndex(prevQuestions => prevQuestions.length);
+      });
     }
   };
 
-  // Drag handlers ...
-  const handleMouseDown = (e: React.MouseEvent) => {
-    e.preventDefault();
-    setDragging(true);
-    dragStart.current = { x: e.clientX - camPos.x, y: e.clientY - camPos.y };
-  };
-  const handleTouchStart = (e: React.TouchEvent) => {
-    e.preventDefault();
-    setDragging(true);
-    const touch = e.touches[0];
-    dragStart.current = { x: touch.clientX - camPos.x, y: touch.clientY - camPos.y };
-  };
-  const handleMouseMove = (e: MouseEvent) => {
-    if (!dragging) return;
-    setCamPos({ x: e.clientX - dragStart.current.x, y: e.clientY - dragStart.current.y });
-  };
-  const handleTouchMove = (e: TouchEvent) => {
-    if (!dragging) return;
-    const touch = e.touches[0];
-    setCamPos({ x: touch.clientX - dragStart.current.x, y: touch.clientY - dragStart.current.y });
-  };
+  // Drag handlers (omitted for brevity, unchanged from before)
+  const handleMouseDown = (e: React.MouseEvent) => { e.preventDefault(); setDragging(true); dragStart.current = { x: e.clientX - camPos.x, y: e.clientY - camPos.y }; };
+  const handleTouchStart = (e: React.TouchEvent) => { e.preventDefault(); setDragging(true); const t = e.touches[0]; dragStart.current = { x: t.clientX - camPos.x, y: t.clientY - camPos.y }; };
+  const handleMouseMove = (e: MouseEvent) => { if (!dragging) return; setCamPos({ x: e.clientX - dragStart.current.x, y: e.clientY - dragStart.current.y }); };
+  const handleTouchMove = (e: TouchEvent) => { if (!dragging) return; const t = e.touches[0]; setCamPos({ x: t.clientX - dragStart.current.x, y: t.clientY - dragStart.current.y }); };
   const stopDrag = () => setDragging(false);
-
   useEffect(() => {
     if (dragging) {
-      window.addEventListener('mousemove', handleMouseMove);
-      window.addEventListener('mouseup', stopDrag);
-      window.addEventListener('touchmove', handleTouchMove, { passive: false });
-      window.addEventListener('touchend', stopDrag);
+      window.addEventListener('mousemove', handleMouseMove); window.addEventListener('mouseup', stopDrag);
+      window.addEventListener('touchmove', handleTouchMove, { passive: false }); window.addEventListener('touchend', stopDrag);
     }
     return () => {
-      window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('mouseup', stopDrag);
-      window.removeEventListener('touchmove', handleTouchMove);
-      window.removeEventListener('touchend', stopDrag);
+      window.removeEventListener('mousemove', handleMouseMove); window.removeEventListener('mouseup', stopDrag);
+      window.removeEventListener('touchmove', handleTouchMove); window.removeEventListener('touchend', stopDrag);
     };
   }, [dragging]);
+
+  if (examFinished) {
+    return (
+      <main className="min-h-screen flex items-center justify-center p-4">
+        <ScoreReport report={scoreReport} />
+      </main>
+    );
+  }
 
   return (
     <main className="min-h-screen flex flex-col items-center justify-center p-4 relative">
       {examStarted && (
-        <div
-          className="absolute z-20 w-24 h-32 md:w-28 md:h-36 cursor-grab active:cursor-grabbing select-none"
+        <div className="absolute z-20 w-24 h-32 md:w-28 md:h-36 cursor-grab active:cursor-grabbing select-none"
           style={{ left: camPos.x, top: camPos.y }}
-          onMouseDown={handleMouseDown}
-          onTouchStart={handleTouchStart}
-        >
-          <CameraView
-            videoRef={videoRef}
-            canvasRef={canvasRef}
-            onExpressionUpdate={setExpression}
-          />
+          onMouseDown={handleMouseDown} onTouchStart={handleTouchStart}>
+          <CameraView videoRef={videoRef} canvasRef={canvasRef} onExpressionUpdate={setExpression} />
         </div>
       )}
-
       {!examStarted ? (
         <div className="text-center space-y-8">
-          <h1 className="text-5xl font-bold bg-gradient-to-r from-blue-400 to-purple-600 bg-clip-text text-transparent">
-            IELTS AI Speaking
-          </h1>
-          <button onClick={startExam} className="px-8 py-4 bg-accent rounded-full text-xl font-semibold hover:bg-blue-600 transition">
-            Start Exam
-          </button>
+          <h1 className="text-5xl font-bold bg-gradient-to-r from-blue-400 to-purple-600 bg-clip-text text-transparent">IELTS AI Speaking</h1>
+          <button onClick={startExam} className="px-8 py-4 bg-accent rounded-full text-xl font-semibold hover:bg-blue-600 transition">Start Exam</button>
         </div>
       ) : (
         <div className="w-full max-w-4xl flex flex-col items-center gap-6">
@@ -176,16 +174,8 @@ export default function Home() {
           <TranscriptBox transcript={transcript} fillerCount={fillerCount} />
           {micActive && (
             <div className="flex items-center gap-2 text-green-400 text-sm">
-              <span className="relative flex h-3 w-3">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-3 w-3 bg-green-500"></span>
-              </span>
-              <span className="w-32 h-2 bg-gray-700 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-green-500 transition-all duration-75"
-                  style={{ width: `${Math.min(micLevel * 100, 100)}%` }}
-                />
-              </span>
+              <span className="relative flex h-3 w-3"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"/><span className="relative inline-flex rounded-full h-3 w-3 bg-green-500"/></span>
+              <span className="w-32 h-2 bg-gray-700 rounded-full overflow-hidden"><div className="h-full bg-green-500 transition-all duration-75" style={{ width: `${Math.min(micLevel*100,100)}%` }}/></span>
               <span>Listening</span>
             </div>
           )}
@@ -193,11 +183,7 @@ export default function Home() {
             isPaused={isPaused}
             onPause={() => setIsPaused(!isPaused)}
             onNext={handleNext}
-            onRetake={() => {
-              resetTranscript();
-              const q = questions[questionIndex];
-              if (q) speak(q);
-            }}
+            onRetake={() => { resetTranscript(); const q = questions[questionIndex]; if (q) speak(q); }}
           />
           <ExpressionBar expression={expression} />
         </div>
