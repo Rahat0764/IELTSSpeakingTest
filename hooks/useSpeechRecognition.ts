@@ -26,7 +26,7 @@ export function useSpeechRecognition(active: boolean) {
     const recognition = new SpeechRecognition();
     recognition.continuous = true;
     recognition.interimResults = true;
-    recognition.lang = 'en-US';
+    recognition.lang = 'en-GB'; // British English for IELTS
 
     recognition.onresult = (event: any) => {
       let final = '';
@@ -36,29 +36,39 @@ export function useSpeechRecognition(active: boolean) {
         if (r.isFinal) final += r[0].transcript + ' ';
         else inter += r[0].transcript + ' ';
       }
+
       if (final) {
         fullTranscriptRef.current += final;
-        setTranscript(fullTranscriptRef.current);
         setFillerCount(evaluateFillerWords(fullTranscriptRef.current));
         setError(null);
       }
+
+      // Always show current full transcript + interim
+      setTranscript(fullTranscriptRef.current);
       setInterim(inter.trim());
     };
 
     recognition.onerror = (event: any) => {
-      console.error('Speech recognition error:', event.error);
+      console.error('Speech error:', event.error);
       if (event.error === 'not-allowed') {
         setError('Microphone access denied. Please allow mic permissions.');
       } else {
-        setError(`Speech recognition error: ${event.error}`);
+        setError(`Speech error: ${event.error}`);
       }
-      recognition.stop();
+    };
+
+    // Restart if it stops unexpectedly (except manual stop)
+    recognition.onend = () => {
+      if (active && recognitionRef.current === recognition) {
+        try { recognition.start(); } catch (e) {}
+      }
     };
 
     recognition.start();
     recognitionRef.current = recognition;
 
     return () => {
+      recognition.onend = null; // prevent restart after unmount
       recognition.stop();
     };
   }, [active]);
@@ -66,6 +76,7 @@ export function useSpeechRecognition(active: boolean) {
   const resetTranscript = () => {
     fullTranscriptRef.current = '';
     setTranscript('');
+    setInterim('');
     setFillerCount(0);
     setError(null);
   };
