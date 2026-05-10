@@ -34,7 +34,6 @@ export function useMicLevel(active: boolean): number {
 
         const updateLevel = () => {
           if (!analyserRef.current || !dataArrayRef.current) return;
-          // Use 'any' to bypass TS strict generic typing
           (analyserRef.current as any).getByteFrequencyData(dataArrayRef.current as any);
           let sum = 0;
           const arr = dataArrayRef.current as any as number[];
