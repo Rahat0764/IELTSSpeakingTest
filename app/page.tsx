@@ -28,7 +28,7 @@ export default function Home() {
   const audioRef = useRef<HTMLAudioElement>(null);
 
   const micActive = !isPaused && examStarted && !examFinished;
-  const { transcript, resetTranscript, fillerCount, getFullTranscript } = useSpeechRecognition(micActive);
+  const { transcript, resetTranscript, fillerCount, getFullTranscript, error: speechError } = useSpeechRecognition(micActive);
   const { generateQuestion, evaluateAnswer } = useGroqExam();
   useSnapshotSender(videoRef, canvasRef, micActive);
   const micLevel = useMicLevel(micActive);
@@ -37,11 +37,13 @@ export default function Home() {
   const [dragging, setDragging] = useState(false);
   const dragStart = useRef({ x: 0, y: 0 });
 
+  // British English voice (much more natural for IELTS)
   const speak = useCallback((text: string) => {
     if (!text) return;
     if (audioRef.current) { audioRef.current.pause(); audioRef.current.src = ''; }
-    const url = `/api/tts?text=${encodeURIComponent(text)}&lang=en`;
+    const url = `/api/tts?text=${encodeURIComponent(text)}&lang=en-GB`;
     const audio = new Audio(url);
+    audio.preload = 'auto';
     audio.onplay = () => setAvatarSpeaking(true);
     audio.onended = () => setAvatarSpeaking(false);
     audio.onerror = () => setAvatarSpeaking(false);
@@ -76,7 +78,7 @@ export default function Home() {
     if (qs.length > 0) { setQuestions(qs); setQuestionIndex(0); sendLog('Exam started', 'info'); }
   };
 
-  // Autosubmit silence detection
+  // Autosubmit silence detection (using direct transcript state)
   const silenceTimerRef = useRef<NodeJS.Timeout | null>(null);
   useEffect(() => {
     if (!micActive || !transcript.trim()) return;
@@ -84,29 +86,26 @@ export default function Home() {
     silenceTimerRef.current = setTimeout(async () => {
       const full = getFullTranscript();
       if (!full.trim()) return;
-      await evaluateAnswer(full, currentPart);
+      // optional: skip evaluation if nothing meaningful
+      // evaluate current answer
+      const evaluation = await evaluateAnswer(full, currentPart);
       sendLog(`Answer submitted for Part ${currentPart}.`, 'info');
       resetTranscript();
 
-      // Determine next question index and part
       const nextIdx = questionIndex + 1;
       if (questions.length > nextIdx) {
         setQuestionIndex(nextIdx);
       } else {
-        // need new questions
         if (currentPart < 3) {
           const newQ = await generateQuestion(currentPart, nextIdx);
           if (newQ.length) {
-            // New questions appended
             setQuestions(prev => {
               const updated = [...prev, ...newQ];
-              // Set index to last added
               setQuestionIndex(updated.length - 1);
               return updated;
             });
           }
         } else {
-          // Exam finish – evaluate last answer and show report
           const finalEval = await evaluateAnswer(full, currentPart);
           setScoreReport(finalEval);
           setExamFinished(true);
@@ -115,6 +114,7 @@ export default function Home() {
         }
       }
     }, 3000);
+
     return () => { if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current); };
   }, [transcript, micActive]);
 
@@ -154,44 +154,76 @@ export default function Home() {
 
   if (examFinished) {
     return (
-      <main className="min-h-screen flex items-center justify-center p-4">
-        <ScoreReport report={scoreReport} />
+      <main className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-dark via-gray-900 to-dark">
+        <div className="animate-fadeIn">
+          <ScoreReport report={scoreReport} />
+        </div>
       </main>
     );
   }
 
   return (
-    <main className="min-h-screen flex flex-col items-center justify-center p-4 relative">
+    <main className="min-h-screen flex flex-col items-center justify-center p-4 relative bg-gradient-to-br from-dark via-gray-900 to-dark">
+      {/* Draggable small camera */}
       {examStarted && (
-        <div className="absolute z-20 w-24 h-32 md:w-28 md:h-36 cursor-grab active:cursor-grabbing select-none"
+        <div
+          className="absolute z-20 w-24 h-32 md:w-28 md:h-36 cursor-grab active:cursor-grabbing select-none shadow-lg rounded-xl"
           style={{ left: camPos.x, top: camPos.y }}
-          onMouseDown={handleMouseDown} onTouchStart={handleTouchStart}>
+          onMouseDown={handleMouseDown}
+          onTouchStart={handleTouchStart}
+        >
           <CameraView videoRef={videoRef} canvasRef={canvasRef} onExpressionUpdate={setExpression} />
         </div>
       )}
+
       {!examStarted ? (
-        <div className="text-center space-y-8">
-          <h1 className="text-5xl font-bold bg-gradient-to-r from-blue-400 to-purple-600 bg-clip-text text-transparent">IELTS AI Speaking</h1>
-          <button onClick={startExam} className="px-8 py-4 bg-accent rounded-full text-xl font-semibold hover:bg-blue-600 transition">Start Exam</button>
+        <div className="text-center space-y-8 backdrop-blur-lg bg-white/5 p-10 rounded-3xl shadow-2xl border border-white/10">
+          <h1 className="text-6xl font-extrabold bg-gradient-to-r from-blue-400 to-purple-600 bg-clip-text text-transparent drop-shadow-lg">
+            IELTS AI Speaking
+          </h1>
+          <p className="text-gray-300 text-lg">Experience the real test with an AI examiner</p>
+          <button
+            onClick={startExam}
+            className="px-10 py-4 bg-accent rounded-full text-xl font-semibold hover:bg-blue-700 transition transform hover:scale-105 active:scale-95 shadow-lg"
+          >
+            Start Exam
+          </button>
         </div>
       ) : (
-        <div className="w-full max-w-4xl flex flex-col items-center gap-6">
+        <div className="w-full max-w-4xl flex flex-col items-center gap-8">
           <Avatar speaking={avatarSpeaking} />
           <QuestionDisplay question={questions[questionIndex]} part={currentPart} />
           <TranscriptBox transcript={transcript} fillerCount={fillerCount} />
+
+          {/* Mic + speech status */}
           {micActive && (
-            <div className="flex items-center gap-2 text-green-400 text-sm">
-              <span className="relative flex h-3 w-3"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"/><span className="relative inline-flex rounded-full h-3 w-3 bg-green-500"/></span>
-              <span className="w-32 h-2 bg-gray-700 rounded-full overflow-hidden"><div className="h-full bg-green-500 transition-all duration-75" style={{ width: `${Math.min(micLevel*100,100)}%` }}/></span>
-              <span>Listening</span>
+            <div className="flex flex-col items-center gap-2">
+              <div className="flex items-center gap-2 text-green-400 text-sm">
+                <span className="relative flex h-3 w-3">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-3 w-3 bg-green-500"></span>
+                </span>
+                <span className="w-32 h-2 bg-gray-700 rounded-full overflow-hidden">
+                  <div className="h-full bg-green-500 transition-all duration-75" style={{ width: `${Math.min(micLevel * 100, 100)}%` }} />
+                </span>
+                <span>Listening</span>
+              </div>
+              {speechError && (
+                <p className="text-red-400 text-xs bg-red-900/30 px-3 py-1 rounded-full">{speechError}</p>
+              )}
+              {!speechError && transcript.length > 0 && (
+                <p className="text-xs text-gray-400">Response will auto‑submit after 3s of silence.</p>
+              )}
             </div>
           )}
+
           <ControlPanel
             isPaused={isPaused}
             onPause={() => setIsPaused(!isPaused)}
             onNext={handleNext}
             onRetake={() => { resetTranscript(); const q = questions[questionIndex]; if (q) speak(q); }}
           />
+
           <ExpressionBar expression={expression} />
         </div>
       )}
