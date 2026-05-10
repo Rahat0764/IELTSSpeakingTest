@@ -24,6 +24,7 @@ export default function Home() {
   });
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const audioRef = useRef<HTMLAudioElement>(null);
 
   const micActive = !isPaused && examStarted;
   const { transcript, resetTranscript, fillerCount } = useSpeechRecognition(micActive);
@@ -31,25 +32,26 @@ export default function Home() {
   useSnapshotSender(videoRef, canvasRef, micActive);
   const micLevel = useMicLevel(micActive);
 
-  // Draggable camera state
+  // Draggable camera
   const [camPos, setCamPos] = useState({ x: 20, y: 20 });
   const [dragging, setDragging] = useState(false);
   const dragStart = useRef({ x: 0, y: 0 });
-  const camRef = useRef<HTMLDivElement>(null);
 
   const speak = useCallback((text: string) => {
-    if (!window.speechSynthesis || !text) return;
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(text);
-    const voices = window.speechSynthesis.getVoices();
-    const enVoice = voices.find(v => v.lang.startsWith('en'));
-    if (enVoice) utterance.voice = enVoice;
-    utterance.rate = 1;
-    utterance.pitch = 1;
-    utterance.onstart = () => setAvatarSpeaking(true);
-    utterance.onend = () => setAvatarSpeaking(false);
-    utterance.onerror = () => setAvatarSpeaking(false);
-    window.speechSynthesis.speak(utterance);
+    if (!text) return;
+    // Stop any current audio
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.src = '';
+    }
+    // Use Google Translate TTS via our API
+    const url = `/api/tts?text=${encodeURIComponent(text)}&lang=en`;
+    const audio = new Audio(url);
+    audio.onplay = () => setAvatarSpeaking(true);
+    audio.onended = () => setAvatarSpeaking(false);
+    audio.onerror = () => setAvatarSpeaking(false);
+    audio.play();
+    audioRef.current = audio;
   }, []);
 
   useEffect(() => {
@@ -57,6 +59,7 @@ export default function Home() {
     if (examStarted && q && !isPaused) speak(q);
   }, [questions, questionIndex, examStarted, isPaused, speak]);
 
+  // sessionStorage persist ...
   useEffect(() => {
     if (examStarted) {
       sessionStorage.setItem('examState', JSON.stringify({
@@ -88,7 +91,10 @@ export default function Home() {
   };
 
   const handleNext = async () => {
-    window.speechSynthesis.cancel();
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.src = '';
+    }
     const nextIdx = questionIndex + 1;
     if (questions.length > nextIdx) {
       setQuestionIndex(nextIdx);
@@ -99,7 +105,7 @@ export default function Home() {
     }
   };
 
-  // Drag handlers
+  // Drag handlers ...
   const handleMouseDown = (e: React.MouseEvent) => {
     e.preventDefault();
     setDragging(true);
@@ -139,10 +145,8 @@ export default function Home() {
 
   return (
     <main className="min-h-screen flex flex-col items-center justify-center p-4 relative">
-      {/* Draggable small camera */}
       {examStarted && (
         <div
-          ref={camRef}
           className="absolute z-20 w-24 h-32 md:w-28 md:h-36 cursor-grab active:cursor-grabbing select-none"
           style={{ left: camPos.x, top: camPos.y }}
           onMouseDown={handleMouseDown}
@@ -167,13 +171,8 @@ export default function Home() {
         </div>
       ) : (
         <div className="w-full max-w-4xl flex flex-col items-center gap-6">
-          {/* Avatar centered */}
           <Avatar speaking={avatarSpeaking} />
-
-          {/* Question */}
           <QuestionDisplay question={questions[questionIndex]} part={currentPart} />
-
-          {/* Transcript + mic level + filler */}
           <TranscriptBox transcript={transcript} fillerCount={fillerCount} />
           {micActive && (
             <div className="flex items-center gap-2 text-green-400 text-sm">
@@ -190,15 +189,9 @@ export default function Home() {
               <span>Listening</span>
             </div>
           )}
-
-          {/* Controls */}
           <ControlPanel
             isPaused={isPaused}
-            onPause={() => {
-              setIsPaused(!isPaused);
-              if (!isPaused) window.speechSynthesis.pause();
-              else window.speechSynthesis.resume();
-            }}
+            onPause={() => setIsPaused(!isPaused)}
             onNext={handleNext}
             onRetake={() => {
               resetTranscript();
@@ -206,8 +199,6 @@ export default function Home() {
               if (q) speak(q);
             }}
           />
-
-          {/* Emotion Detection at the bottom */}
           <ExpressionBar expression={expression} />
         </div>
       )}
