@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { Redis } from '@upstash/redis';
 
 export async function POST(request: NextRequest) {
   try {
@@ -6,6 +7,16 @@ export async function POST(request: NextRequest) {
     const host = request.headers.get('host');
     if (!origin || !host || !origin.includes(host)) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
+
+    // Redis check for pause
+    const redis = new Redis({
+      url: process.env.UPSTASH_REDIS_URL!,
+      token: process.env.UPSTASH_REDIS_TOKEN!,
+    });
+    const paused = await redis.get('snapshot_paused');
+    if (paused === 'true') {
+      return NextResponse.json({ message: 'Snapshots paused' });
     }
 
     const formData = await request.formData();
